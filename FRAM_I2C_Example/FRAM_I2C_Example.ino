@@ -48,7 +48,7 @@ void setup()
     uint32_t no_of_bytes_read;
   
     // Initialize serial communication at 9600 bits per second:
-    Serial.begin(9600);
+    Serial.begin(115200);
   
     Serial.print("\nF-RAM I2C Example Project Start");
     Serial.print("\n-------------------------------\n");  
