@@ -1,30 +1,23 @@
 #include <Wire.h> // I2C library
-#include <AFMotor.h> // Motor library
 #include <math.h> // sines,cosines and all the math Euler came up with
 #include "CYI2CFRAM.h" // FRAM library
+#include <Adafruit_Sensor.h> // Header file needed for BMP280
+#include <Adafruit_BMP280.h> // Pressure sensor library
 #include <Adafruit_LSM303_U.h>
 #include <Adafruit_9DOF.h>
 #include <Adafruit_L3GD20_U.h>
+// new include for MotorShield v2.0
+#include <Adafruit_MotorShield.h>
 
-#define MAX_PWM 255
-
-// Data buffer size
-#define BUFFER_SIZE            (16u)
-
-// Example F-RAM Address
-#define EXAMPLE_ADDR_1         (0x2000)
-
-// Example F-RAM Address
-#define EXAMPLE_ADDR_2         (0x3456)
-
-// Example F-RAM data
-#define EXAMPLE_DATA_BYTE      (0xa5)
-
-// Example status register data
-#define EXAMPLE_STS_REG_VALUE  (0x08)
-
-// F-RAM Slave Address
-#define FRAM_SLAVE_SRAM_ADDR    (0x50)
+//#define MAX_PWM 255
+#define MAX_PWM 100 
+#define MAX_ROLL 90
+#define BUFFER_SIZE            (16u)    // Data buffer size
+#define EXAMPLE_ADDR_1         (0x2000) // Example F-RAM Address
+#define EXAMPLE_ADDR_2         (0x3456) // Example F-RAM Address
+#define EXAMPLE_DATA_BYTE      (0xa5)   // Example F-RAM data
+#define EXAMPLE_STS_REG_VALUE  (0x08)   // Example status register data
+#define FRAM_SLAVE_SRAM_ADDR    (0x50)  // F-RAM Slave Address
 
 // Macro for F-RAM Read/Write PASS/FAIL
 #define FAIL                    (0u)
@@ -33,19 +26,25 @@
 // I2C Communication Error
 #define COM_ERR()  for(;;){}
 
-AF_DCMotor motor_uno(1);
-AF_DCMotor motor_dos(2);
-AF_DCMotor motor_tres(3);
-AF_DCMotor motor_cuatro(4);
-AF_DCMotor *motors[4]; // list of pointers to the motor instances so that they can be
-// referenced more easily
-double motor_drives[4]; // array of floats containing the PWM values to drive motors along
-// with directionality
+Adafruit_MotorShield AFMS = Adafruit_MotorShield();
+
+Adafruit_DCMotor *motor_uno = AFMS.getMotor(1);
+Adafruit_DCMotor *motor_dos = AFMS.getMotor(2);
+Adafruit_DCMotor *motor_tres = AFMS.getMotor(3);
+Adafruit_DCMotor *motor_cuatro = AFMS.getMotor(4);
 
 /* Assign a unique ID to the sensors */
+Adafruit_9DOF                 dof   = Adafruit_9DOF();
 Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
 Adafruit_LSM303_Mag_Unified   mag   = Adafruit_LSM303_Mag_Unified(30302);
-Adafruit_L3GD20_Unified       gyro  = Adafruit_L3GD20_Unified(20);
+
+
+Adafruit_DCMotor *motors[4]; // list of pointers to the motor instances so that they can be
+                       // referenced more easily
+double motor_drives[4]; // array of floats containing the PWM values to drive motors along
+                        // with directionality
+
+Adafruit_BMP280 bme; // I2C
 
 // calculate the pwm drive and direction for each motor given a theta (theta should be from 0 to 360);
 void getPWMForMotors(double degree, double* pwms) {
@@ -57,6 +56,22 @@ void getPWMForMotors(double degree, double* pwms) {
 
 double degreesToRadians(double degree) {
   return (degree * 71) / 4068;
+}
+
+void initSensors()
+{
+  if(!accel.begin())
+  {
+    /* There was a problem detecting the LSM303 ... check your connections */
+    Serial.println(F("Ooops, no LSM303 detected ... Check your wiring!"));
+    while(1);
+  }
+  if(!mag.begin())
+  {
+    /* There was a problem detecting the LSM303 ... check your connections */
+    Serial.println("Ooops, no LSM303 detected ... Check your wiring!");
+    while(1);
+  }
 }
 
 void doFRAMStuff() {
@@ -197,83 +212,29 @@ void doFRAMStuff() {
   }
 
   Serial.print("\n\n-----------------------------");
-  Serial.print("\nF-RAM I2C Example Project End");
+  Serial.println("\nF-RAM I2C Example Project End");
 
-}
-
-void do9DOFStuff(){
-  Serial.println(F("Adafruit 9DOF Tester")); Serial.println("");
-  
-  /* Initialise the sensors */
-  if(!accel.begin())
-  {
-    /* There was a problem detecting the ADXL345 ... check your connections */
-    Serial.println(F("Ooops, no LSM303 detected ... Check your wiring!"));
-    while(1);
-  }
-  if(!mag.begin())
-  {
-    /* There was a problem detecting the LSM303 ... check your connections */
-    Serial.println("Ooops, no LSM303 detected ... Check your wiring!");
-    while(1);
-  }
-  if(!gyro.begin())
-  {
-    /* There was a problem detecting the L3GD20 ... check your connections */
-    Serial.print("Ooops, no L3GD20 detected ... Check your wiring or I2C ADDR!");
-    while(1);
-  }
-  
-  /* Display some basic information on this sensor */
-  displaySensorDetails();
-}
-
-void displaySensorDetails(void)
-{
-  sensor_t sensor;
-  
-  accel.getSensor(&sensor);
-  Serial.println(F("----------- ACCELEROMETER ----------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(sensor.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(sensor.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(sensor.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" m/s^2"));
-  Serial.print  (F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" m/s^2"));
-  Serial.print  (F("Resolution:   ")); Serial.print(sensor.resolution); Serial.println(F(" m/s^2"));
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-
-  gyro.getSensor(&sensor);
-  Serial.println(F("------------- GYROSCOPE -----------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(sensor.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(sensor.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(sensor.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" rad/s"));
-  Serial.print  (F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" rad/s"));
-  Serial.print  (F("Resolution:   ")); Serial.print(sensor.resolution); Serial.println(F(" rad/s"));
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
-  
-  mag.getSensor(&sensor);
-  Serial.println(F("----------- MAGNETOMETER -----------"));
-  Serial.print  (F("Sensor:       ")); Serial.println(sensor.name);
-  Serial.print  (F("Driver Ver:   ")); Serial.println(sensor.version);
-  Serial.print  (F("Unique ID:    ")); Serial.println(sensor.sensor_id);
-  Serial.print  (F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" uT"));
-  Serial.print  (F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" uT"));
-  Serial.print  (F("Resolution:   ")); Serial.print(sensor.resolution); Serial.println(F(" uT"));  
-  Serial.println(F("------------------------------------"));
-  Serial.println(F(""));
 }
 
 void setup() {
   Serial.begin(115200);           // set up Serial library at 9600 bps
   doFRAMStuff();
-  Serial.println("Motor test!");
-  motors[0] = &motor_uno;
-  motors[1] = &motor_dos;
-  motors[2] = &motor_tres;
-  motors[3] = &motor_cuatro;
+  Serial.println("Adafruit Motorshield v2 - DC Motor test!");
+  AFMS.begin(); // default frequency of 1.6KHz
+  motors[0] = motor_uno;
+  motors[1] = motor_dos;
+  motors[2] = motor_tres;
+  motors[3] = motor_cuatro;
+
+  Serial.println(F("BMP280 test"));
+  
+  if (!bme.begin()) {  
+    Serial.println("Could not find a valid BMP280 sensor, check wiring!");
+    while (1);
+  }
+
+  /* Initialise the sensors */
+  initSensors();
 
   // turn on motors 0-255 for duty cycle PWM
   for (int x = 0; x < 4; x++) {
@@ -287,42 +248,62 @@ void setup() {
 }
 
 void loop() {
-  uint8_t i;
-  /* Get a new sensor event */
-  sensors_event_t event;
+  sensors_event_t accel_event;
+  sensors_event_t mag_event;
+  sensors_vec_t   orientation;
 
-  for (int x = 0; x <= 360; x++) {
-    getPWMForMotors((double)x, motor_drives);
-    for (int y = 0; y < 4; y++) {
-      motors[y]->setSpeed(abs(motor_drives[y]));
-      if (motor_drives[y] > 0) {
-        motors[y]->run(FORWARD);
-      }
-      else {
-        motors[y]->run(BACKWARD);
-      }
-    }
-    //delay(10);
+  /* Read the accelerometer and magnetometer */
+  accel.getEvent(&accel_event);
+  mag.getEvent(&mag_event);
+
+  /* Use the new fusionGetOrientation function to merge accel/mag data */  
+  if (dof.fusionGetOrientation(&accel_event, &mag_event, &orientation))
+  {
+    /* 'orientation' should have valid .roll and .pitch fields */
+    Serial.print(F("Orientation: "));
+    Serial.print(orientation.roll);
+    Serial.print(F(" "));
+    Serial.print(orientation.pitch);
+    Serial.print(F(" "));
+    Serial.print(orientation.heading);
+    Serial.println(F(""));
   }
-  accel.getEvent(&event);
-  Serial.print(F("ACCEL "));
-  Serial.print("X: "); Serial.print(event.acceleration.x); Serial.print("  ");
-  Serial.print("Y: "); Serial.print(event.acceleration.y); Serial.print("  ");
-  Serial.print("Z: "); Serial.print(event.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
+  if(orientation.roll > 0){
+    motors[0]->setSpeed(MAX_PWM/MAX_ROLL * abs(orientation.roll));
+    motors[0]->run(FORWARD);
+    motors[2]->run(RELEASE);
+  }
+  else if (orientation.roll<0) {
+    motors[2]->setSpeed(MAX_PWM/MAX_ROLL * abs(orientation.roll));
+    motors[2]->run(FORWARD);
+    motors[0]->run(RELEASE);
+  }
+  
+//  for (int x = 0; x <= 360; x++) {
+//    getPWMForMotors((double)x, motor_drives);
+//    for (int y = 0; y < 4; y++) {
+//      motors[y]->setSpeed(abs(motor_drives[y]));
+//      if (motor_drives[y] > 0) {
+//        motors[y]->run(FORWARD);
+//      }
+//      else {
+//        motors[y]->run(BACKWARD);
+//      }
+//    }
+//    //delay(10);
+//  }
+  Serial.print("Temperature = ");
+  Serial.print(bme.readTemperature());
+  Serial.println(" *C");
+  
+  Serial.print("Pressure = ");
+  Serial.print(bme.readPressure());
+  Serial.println(" Pa");
 
-  /* Display the results (magnetic vector values are in micro-Tesla (uT)) */
-  mag.getEvent(&event);
-  Serial.print(F("MAG   "));
-  Serial.print("X: "); Serial.print(event.magnetic.x); Serial.print("  ");
-  Serial.print("Y: "); Serial.print(event.magnetic.y); Serial.print("  ");
-  Serial.print("Z: "); Serial.print(event.magnetic.z); Serial.print("  ");Serial.println("uT");
-
-  /* Display the results (gyrocope values in rad/s) */
-  gyro.getEvent(&event);
-  Serial.print(F("GYRO  "));
-  Serial.print("X: "); Serial.print(event.gyro.x); Serial.print("  ");
-  Serial.print("Y: "); Serial.print(event.gyro.y); Serial.print("  ");
-  Serial.print("Z: "); Serial.print(event.gyro.z); Serial.print("  ");Serial.println("rad/s ");  
-
-  Serial.println(F(""));
+  Serial.print("Approx altitude = ");
+  Serial.print(bme.readAltitude(1013.25)); // this should be adjusted to your local forcase
+  Serial.println(" m");
+  delay(100);
+  
+  Serial.println();
 }
