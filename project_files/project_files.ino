@@ -1,52 +1,52 @@
 /******************************************************************************
-MIT 6.UAP Spring 2016
-Swing Feedback System
-Gerzain Mata
+  MIT 6.UAP Spring 2016
+  Swing Feedback System
+  Gerzain Mata
 
-The primary objective of this code is to attempt to demonstrate feedback with
-respect to a reference swing in 3D space.
+  The primary objective of this code is to attempt to demonstrate feedback with
+  respect to a reference swing in 3D space.
 
-In our scenario an experienced batter records his/her swing by holding the
-rocker switch.  The bat is now in the RECORD state.  An Adafruit 9DOF IMU gets
-the acceleration, gyroscope, and magnetometer measurements and are passed to
-the Atmega328P.  The MCU then implements Madgwick's IMU algorithm which
-provides roll, pitch, and yaw values with fast convergence and no noticeable
-drift. 
+  In our scenario an experienced batter records his/her swing by holding the
+  rocker switch.  The bat is now in the RECORD state.  An Adafruit 9DOF IMU gets
+  the acceleration, gyroscope, and magnetometer measurements and are passed to
+  the Atmega328P.  The MCU then implements Madgwick's IMU algorithm which
+  provides roll, pitch, and yaw values with fast convergence and no noticeable
+  drift.
 
-The measurements are then saved to a Cypress FRAM module since the MCU doesn't 
-have sufficient memory space to save all the measurements.  The Cypress FRAM
-module allows the measurements to persist even after the bat is turned off.
+  The measurements are then saved to a Cypress FRAM module since the MCU doesn't
+  have sufficient memory space to save all the measurements.  The Cypress FRAM
+  module allows the measurements to persist even after the bat is turned off.
 
-When the user lets go of the rocker switch the bat then goes into the START
-state whereby it waits for user input on the GREEN button to enter the DELAY
-state.
+  When the user lets go of the rocker switch the bat then goes into the START
+  state whereby it waits for user input on the GREEN button to enter the DELAY
+  state.
 
-When the bat goes into the DELAY state the bat waits for two seconds so that
-the user can prepare his/herself to execute their own "novice" swing. After
-two seconds the bat goes into the PLAYBACK state.
+  When the bat goes into the DELAY state the bat waits for two seconds so that
+  the user can prepare his/herself to execute their own "novice" swing. After
+  two seconds the bat goes into the PLAYBACK state.
 
-During PLAYBACK the MCU starts reading the FRAM from the beginning of
-the memory space.  The current Yaw, Pitch, and Roll values are compared to the
-Yaw, Pitch, and Roll values from the recorded values and a PID controller is
-implemented for each rotation axis.
+  During PLAYBACK the MCU starts reading the FRAM from the beginning of
+  the memory space.  The current Yaw, Pitch, and Roll values are compared to the
+  Yaw, Pitch, and Roll values from the recorded values and a PID controller is
+  implemented for each rotation axis.
 
-Once the user finishes his/her swing in PLAYBACK mode then the bat returns to
-the START state.
+  Once the user finishes his/her swing in PLAYBACK mode then the bat returns to
+  the START state.
 
-RGB LED states:
-START     --> BLUE
-DELAY     --> ORANGE
-PLAYBACK  --> GREEN
-RECORD    --> RED
+  RGB LED states:
+  START     --> BLUE
+  DELAY     --> ORANGE
+  PLAYBACK  --> GREEN
+  RECORD    --> RED
 
-Arduino Pinout:
-SCL       --> Adafruit 9DOF SCL
-SDA       --> Adafruit 9DOF SDA
-D9        --> GREEN LED (active low)
-D10       --> RED LED (active low)
-D11       --> BLUE LED (active low)
-D2        --> Rocker Switch (w/pullup)
-D3        --> Green Switch (w/pullup)
+  Arduino Pinout:
+  SCL       --> Adafruit 9DOF SCL
+  SDA       --> Adafruit 9DOF SDA
+  D9        --> GREEN LED (active low)
+  D10       --> RED LED (active low)
+  D11       --> BLUE LED (active low)
+  D2        --> Rocker Switch (w/pullup)
+  D3        --> Green Pushbutton (w/pullup)
 ******************************************************************************/
 #include <math.h> // sines,cosines and all the math Euler came up with
 #include "CYI2CFRAM.h" // FRAM read/write
@@ -66,6 +66,8 @@ D3        --> Green Switch (w/pullup)
 #define GREEN_LED_PIN 9
 #define RED_LED_PIN 10
 #define BLUE_LED_PIN 11
+#define ROCKER_PIN 2
+#define GREEN_BTN_PIN 3
 
 // FRAM constants
 #define NUM_SAMPLES_READ 100 // try to read the first 100 gyro measurements
@@ -107,6 +109,7 @@ uint8_t sts;
 float samplefreq;
 unsigned long last_time;
 unsigned long new_time;
+volatile unsigned long delayStart;
 float dt;
 
 sensors_event_t accel_event;
@@ -114,8 +117,8 @@ sensors_event_t mag_event;
 sensors_event_t gyro_event;
 sensors_vec_t   orientation;
 
-enum current_state { START, RECORD, PLAYBACK };
-enum current_state myState;
+enum current_state {START, RECORD, PLAYBACK, DELAY};
+volatile enum current_state myState;
 
 Madgwick myIMU(betaDef, sampleFreq);
 
@@ -172,10 +175,24 @@ float invSqrt(float x) {
 
 // calculate the pwm drive and direction for each motor given a theta (theta should be from 0 to 360);
 void getPWMForMotors(double degree, double* pwms) {
-  pwms[0] = MAX_PWM * cos(degreesToRadians(degree));
-  pwms[1] = MAX_PWM * sin(degreesToRadians(degree));
-  pwms[2] = -(pwms[0]);
-  pwms[3] = -(pwms[1]);
+  float horizontal = cos(degreesToRadians(degree));
+  float vertical = sin(degreesToRadians(degree));
+  if (horizontal >= 0) {
+    pwms[0] = MAX_PWM * horizontal;
+    pwms[2] = 0;
+  }
+  else {
+    pwms[2] = MAX_PWM * horizontal;
+    pwms[0] = 0;
+  }
+  if (vertical >= 0) {
+    pwms[1] = MAX_PWM * vertical;
+    pwms[3] = 0;
+  }
+  else {
+    pwms[3] = MAX_PWM * vertical;
+    pwms[1] = 0;
+  }
 }
 
 double degreesToRadians(double degree) {
@@ -230,18 +247,18 @@ void doFRAMStuff() {
   for (i = 0; i < NUM_SAMPLES_READ; i++) {
     if (!i) {
       no_of_bytes_read = FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
-      readFramAddress+=4;
+      readFramAddress += 4;
     }
     else {
       no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
-      readFramAddress+=4;
+      readFramAddress += 4;
     }
     if (no_of_bytes_read == sizeof(float))
     {
       result = PASS;
       Serial.print("Roll: ");
       Serial.print(ff2b.f);
-      readFramAddress+=4;
+      readFramAddress += 4;
     }
     no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
     if (no_of_bytes_read == sizeof(float))
@@ -249,7 +266,7 @@ void doFRAMStuff() {
       result = PASS;
       Serial.print(" Pitch: ");
       Serial.print(ff2b.f);
-      readFramAddress+=4;
+      readFramAddress += 4;
     }
     no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
     if (no_of_bytes_read == sizeof(float))
@@ -257,7 +274,7 @@ void doFRAMStuff() {
       result = PASS;
       Serial.print(" Yaw: ");
       Serial.println(ff2b.f);
-      readFramAddress+=4;
+      readFramAddress += 4;
     }
   }
 
@@ -265,6 +282,63 @@ void doFRAMStuff() {
   Serial.print("\n\n-----------------------------");
   Serial.println("\nF-RAM Read N samples End\n");
 
+}
+
+void printIMUOutput() {
+  Serial.print(F("Orientation: "));
+  Serial.print(F("Roll: "));
+  Serial.print(orientation.roll);
+  Serial.print(F(" Pitch: "));
+  Serial.print(orientation.pitch);
+  Serial.print(F(" Yaw: "));
+  Serial.print(orientation.heading);
+  Serial.print(F(" SampleFreq: "));
+  Serial.print(samplefreq);
+  Serial.println(F(""));
+}
+
+void updateIMUAndDoMadgwick() {
+  /* Read the accelerometer and magnetometer */
+  accel.getEvent(&accel_event);
+  mag.getEvent(&mag_event);
+  gyro.getEvent(&gyro_event);
+
+  float  gx = gyro_event.gyro.x;
+  float  gy = gyro_event.gyro.y;
+  float  gz = gyro_event.gyro.z;
+
+  /* Get a new sensor event */
+  float  ax = (accel_event.acceleration.x) * 101 ;
+  float  ay = accel_event.acceleration.y * 101;
+  float  az = accel_event.acceleration.z * 101 ;
+
+  /* Get a new sensor event */
+  float  mx = mag_event.magnetic.x;
+  float  my = mag_event.magnetic.y;
+  float  mz = mag_event.magnetic.z;
+
+  myIMU.update(gx, gy, gz, ax, ay, az, mx, my, mz);
+
+  orientation.pitch = myIMU.getRoll() * 180 / PI;
+  orientation.roll = myIMU.getPitch() * 180 / PI;
+  orientation.heading = myIMU.getYaw() * 180 / PI;
+}
+
+void rockerISR() {
+  if (digitalRead(ROCKER_PIN)) {
+    myState = START;
+  }
+  else {
+    myState = RECORD;
+    writeFramAddress = 0x0000;
+  }
+}
+
+void greenBtnISR() {
+  if (myState == START) {
+    myState = DELAY;
+    delayStart = millis();
+  }
 }
 
 void setup() {
@@ -298,114 +372,116 @@ void setup() {
   pinMode(RED_LED_PIN, OUTPUT);           // set pin to output
   pinMode(GREEN_LED_PIN, OUTPUT);
   pinMode(BLUE_LED_PIN, OUTPUT);
-  digitalWrite(RED_LED_PIN, LOW);       // turn on pullup resistors
-  digitalWrite(GREEN_LED_PIN, LOW);       // turn on pullup resistors
-  digitalWrite(BLUE_LED_PIN, LOW);       // turn on pullup resistors
+  pinMode(ROCKER_PIN, INPUT);             // set rocker pin to input
+  pinMode(GREEN_BTN_PIN, INPUT);          // set green pushbutton pin to input
+  attachInterrupt(digitalPinToInterrupt(ROCKER_PIN), rockerISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(GREEN_BTN_PIN), greenBtnISR, LOW);
 }
 
 void loop() {
 
-  /* Read the accelerometer and magnetometer */
-  accel.getEvent(&accel_event);
-  mag.getEvent(&mag_event);
-  gyro.getEvent(&gyro_event);
+  updateIMUAndDoMadgwick();
+  switch (myState) {
+    case START: // paint it blue
+      digitalWrite(RED_LED_PIN, HIGH);
+      digitalWrite(GREEN_LED_PIN, HIGH);
+      digitalWrite(BLUE_LED_PIN, LOW);
+      break;
+    case DELAY: // paint it orange
+      digitalWrite(RED_LED_PIN, LOW);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      digitalWrite(BLUE_LED_PIN, HIGH);
+      break;
+    case RECORD: // paint it red
+      digitalWrite(RED_LED_PIN, LOW);
+      digitalWrite(GREEN_LED_PIN, HIGH);
+      digitalWrite(BLUE_LED_PIN, HIGH);
+      break;
+    case PLAYBACK: // paint it green
+      digitalWrite(RED_LED_PIN, HIGH);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      digitalWrite(BLUE_LED_PIN, HIGH);
+      break;
+    default: // paint it white
+      digitalWrite(RED_LED_PIN, LOW);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      digitalWrite(BLUE_LED_PIN, LOW);
+  }
 
-  float  gx = gyro_event.gyro.x;
-  float  gy = gyro_event.gyro.y;
-  float  gz = gyro_event.gyro.z;
-
-  /* Get a new sensor event */
-  float  ax = (accel_event.acceleration.x) * 101 ;
-  float  ay = accel_event.acceleration.y * 101;
-  float  az = accel_event.acceleration.z * 101 ;
-
-  /* Get a new sensor event */
-  float  mx = mag_event.magnetic.x;
-  float  my = mag_event.magnetic.y;
-  float  mz = mag_event.magnetic.z;
-
-  myIMU.update(gx, gy, gz, ax, ay, az, mx, my, mz);
-
-  orientation.pitch = myIMU.getRoll() * 180 / PI;
-  orientation.roll = myIMU.getPitch() * 180 / PI;
-  orientation.heading = myIMU.getYaw() * 180 / PI;
-
-  /* 'orientation' should have valid .roll and .pitch fields */
   new_time = millis();
   dt = (new_time - last_time) * 0.001; //in seconds
   samplefreq = 1000 / (new_time - last_time);
   last_time = new_time;
-  Serial.print(F("Orientation: "));
-  Serial.print(F("Roll: "));
-  Serial.print(orientation.roll);
-  Serial.print(F(" Pitch: "));
-  Serial.print(orientation.pitch);
-  Serial.print(F(" Yaw: "));
-  Serial.print(orientation.heading);
-  Serial.print(F(" SampleFreq: "));
-  Serial.print(samplefreq);
-  Serial.println(F(""));
 
-  if(myState == PLAYBACK && readFramAddress <= writeFramAddress){
-    framFloatToBytes readRoll, readPitch, readYaw;
-    if(!hasStartedFram){
-      readFramAddress = 0x0000;
-      FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
-      readFramAddress+=4;
-      hasStartedFram = !hasStartedFram;
-    }
-    else {
-      FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
-      readFramAddress+=4;
-    }
-    FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readPitch.b), sizeof(float));
-    FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readYaw.b), sizeof(float));
-    readFramAddress+=8;
+  // print output to serial port
+  printIMUOutput();
 
-    rollPid.updateState(readRoll.f, orientation.roll);
-    pitchPid.updateState(readPitch.f, orientation.pitch);
-    yawPid.updateState(readYaw.f, orientation.heading);
-
-    float rollPwm = rollPid.getOutput();
-    float pitchPwm = pitchPid.getOutput();
-    float yawPwm =  yawPid.getOutput();
-
-     if (pitchPwm < 0) {
-     motors[0]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
-     motors[0]->run(FORWARD);
-     motors[2]->run(RELEASE);
-   }
-    else if (pitchPwm > 0) {
-     motors[2]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
-     motors[2]->run(FORWARD);
-     motors[0]->run(RELEASE);
-   }
-   if (yawPwm < 0) {
-     motors[1]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
-     motors[1]->run(FORWARD);
-     motors[3]->run(RELEASE);
-   }
-    else if (yawPwm > 0) {
-     motors[3]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
-     motors[3]->run(FORWARD);
-     motors[1]->run(RELEASE);
-   }
-
+  if (myState == DELAY && (new_time - delayStart >= 2000)) {
+    myState = PLAYBACK;
   }
 
-  //  for (int x = 0; x <= 360; x++) {
-  //    getPWMForMotors((double)x, motor_drives);
-  //    for (int y = 0; y < 4; y++) {
-  //      motors[y]->setSpeed(abs(motor_drives[y]));
-  //      if (motor_drives[y] > 0) {
-  //        motors[y]->run(FORWARD);
-  //      }
-  //      else {
-  //        motors[y]->run(BACKWARD);
-  //      }
-  //    }
-  //    //delay(10);
-  //  }
+  if (myState == PLAYBACK) {
+    if (readFramAddress <= writeFramAddress) {
+      framFloatToBytes readRoll, readPitch, readYaw;
+      if (!hasStartedFram) {
+        readFramAddress = 0x0000;
+        FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
+        readFramAddress += 4;
+        hasStartedFram = !hasStartedFram;
+      }
+      else {
+        FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
+        readFramAddress += 4;
+      }
+      FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readPitch.b), sizeof(float));
+      FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readYaw.b), sizeof(float));
+      readFramAddress += 8;
+
+      rollPid.updateState(readRoll.f, orientation.roll);
+      pitchPid.updateState(readPitch.f, orientation.pitch);
+      yawPid.updateState(readYaw.f, orientation.heading);
+
+      float rollPwm = rollPid.getOutput();
+      float pitchPwm = pitchPid.getOutput();
+      float yawPwm =  yawPid.getOutput();
+
+      if (pitchPwm < 0) {
+        motors[0]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
+        motors[0]->run(FORWARD);
+        motors[2]->run(RELEASE);
+      }
+      else if (pitchPwm > 0) {
+        motors[2]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
+        motors[2]->run(FORWARD);
+        motors[0]->run(RELEASE);
+      }
+      if (yawPwm < 0) {
+        motors[1]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
+        motors[1]->run(FORWARD);
+        motors[3]->run(RELEASE);
+      }
+      else if (yawPwm > 0) {
+        motors[3]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
+        motors[3]->run(FORWARD);
+        motors[1]->run(RELEASE);
+      }
+    }
+    else {
+      myState = START; // played back all the samples so we're back at our original state
+      readFramAddress = 0x0000; // go back to the beginning of the read address.
+    }
+  }
+
+  if (myState == START) {
+    for (int x = 0; x <= 360; x++) {
+      getPWMForMotors((double)x, motor_drives);
+      for (int y = 0; y < 4; y++) {
+        motors[y]->setSpeed(motor_drives[y]);
+        motors[y]->run(FORWARD);
+      }
+      //delay(10);
+    }
+  }
 
   // Save measurements to FRAM
   if (myState == RECORD) {
