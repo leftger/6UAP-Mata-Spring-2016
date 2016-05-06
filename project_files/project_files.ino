@@ -1,8 +1,56 @@
-#include <Wire.h> // I2C library
+/******************************************************************************
+MIT 6.UAP Spring 2016
+Swing Feedback System
+Gerzain Mata
+
+The primary objective of this code is to attempt to demonstrate feedback with
+respect to a reference swing in 3D space.
+
+In our scenario an experienced batter records his/her swing by holding the
+rocker switch.  The bat is now in the RECORD state.  An Adafruit 9DOF IMU gets
+the acceleration, gyroscope, and magnetometer measurements and are passed to
+the Atmega328P.  The MCU then implements Madgwick's IMU algorithm which
+provides roll, pitch, and yaw values with fast convergence and no noticeable
+drift. 
+
+The measurements are then saved to a Cypress FRAM module since the MCU doesn't 
+have sufficient memory space to save all the measurements.  The Cypress FRAM
+module allows the measurements to persist even after the bat is turned off.
+
+When the user lets go of the rocker switch the bat then goes into the START
+state whereby it waits for user input on the GREEN button to enter the DELAY
+state.
+
+When the bat goes into the DELAY state the bat waits for two seconds so that
+the user can prepare his/herself to execute their own "novice" swing. After
+two seconds the bat goes into the PLAYBACK state.
+
+During PLAYBACK the MCU starts reading the FRAM from the beginning of
+the memory space.  The current Yaw, Pitch, and Roll values are compared to the
+Yaw, Pitch, and Roll values from the recorded values and a PID controller is
+implemented for each rotation axis.
+
+Once the user finishes his/her swing in PLAYBACK mode then the bat returns to
+the START state.
+
+RGB LED states:
+START     --> BLUE
+DELAY     --> ORANGE
+PLAYBACK  --> GREEN
+RECORD    --> RED
+
+Arduino Pinout:
+SCL       --> Adafruit 9DOF SCL
+SDA       --> Adafruit 9DOF SDA
+D9        --> GREEN LED (active low)
+D10       --> RED LED (active low)
+D11       --> BLUE LED (active low)
+D2        --> Rocker Switch (w/pullup)
+D3        --> Green Switch (w/pullup)
+******************************************************************************/
 #include <math.h> // sines,cosines and all the math Euler came up with
-#include "CYI2CFRAM.h" // FRAM library
+#include "CYI2CFRAM.h" // FRAM read/write
 #include <Adafruit_Sensor.h>
-//#include <Adafruit_BMP280.h> // Pressure sensor library
 #include <Adafruit_LSM303_U.h>
 #include <Adafruit_9DOF.h>
 #include <Adafruit_L3GD20_U.h>
@@ -11,9 +59,13 @@
 
 // Constants for motor drive
 #define MAX_PWM 150
+#define MIN_PWM -150
+#define MAX_PITCH 90
+#define MAX_YAW 180
 #define MAX_ROLL 90
-#define outMax 255
-#define outMin 255
+#define GREEN_LED_PIN 9
+#define RED_LED_PIN 10
+#define BLUE_LED_PIN 11
 
 // FRAM constants
 #define NUM_SAMPLES_READ 100 // try to read the first 100 gyro measurements
@@ -45,11 +97,12 @@ Adafruit_DCMotor *motors[4]; // list of pointers to the motor instances so that 
 double motor_drives[4]; // array of floats containing the PWM values to drive motors along
 // with directionality
 
-//Adafruit_BMP280 bme; // I2C Pressure Sensor
-
 uint8_t *toFram;
 unsigned int i;
-volatile uint32_t framAddress = 0x0000;
+volatile uint32_t readFramAddress;
+volatile uint32_t writeFramAddress;
+bool hasStartedFram;
+uint8_t sts;
 
 float samplefreq;
 unsigned long last_time;
@@ -60,6 +113,9 @@ sensors_event_t accel_event;
 sensors_event_t mag_event;
 sensors_event_t gyro_event;
 sensors_vec_t   orientation;
+
+enum current_state { START, RECORD, PLAYBACK };
+enum current_state myState;
 
 Madgwick myIMU(betaDef, sampleFreq);
 
@@ -84,8 +140,8 @@ class PIDControl
       current_meas = current;
       error = desired - current_meas; // current error
       error_integral += error * dt * ki;
-      if (error_integral > outMax) error_integral = outMax;
-      else if (error_integral < outMin) error_integral = outMin;
+      if (error_integral > MAX_PWM) error_integral = MAX_PWM;
+      else if (error_integral < MIN_PWM) error_integral = MIN_PWM;
       error_deriv = (current_meas - prev_meas) / dt;
       output = kp * error + error_integral - kd * error_deriv;
     }
@@ -96,8 +152,8 @@ class PIDControl
 };
 
 PIDControl rollPid;
-PIDControl PitchPid;
-PIDControl headingPid;
+PIDControl pitchPid;
+PIDControl yawPid;
 
 union framFloatToBytes {
   float f;
@@ -165,9 +221,6 @@ void doFRAMStuff() {
   Serial.print("\nReading first N samples from FRAM");
   Serial.print("\n-------------------------------\n");
 
-  // Initialize I2C F-RAM
-  FRAM_I2C_Init();
-
   // Start-up Delay
   delay(100);
 
@@ -176,14 +229,19 @@ void doFRAMStuff() {
 
   for (i = 0; i < NUM_SAMPLES_READ; i++) {
     if (!i) {
-      no_of_bytes_read = FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, framAddress, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
+      no_of_bytes_read = FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
+      readFramAddress+=4;
     }
-    else no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
+    else {
+      no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
+      readFramAddress+=4;
+    }
     if (no_of_bytes_read == sizeof(float))
     {
       result = PASS;
       Serial.print("Roll: ");
       Serial.print(ff2b.f);
+      readFramAddress+=4;
     }
     no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
     if (no_of_bytes_read == sizeof(float))
@@ -191,6 +249,7 @@ void doFRAMStuff() {
       result = PASS;
       Serial.print(" Pitch: ");
       Serial.print(ff2b.f);
+      readFramAddress+=4;
     }
     no_of_bytes_read = FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(ff2b.b), sizeof(float));
     if (no_of_bytes_read == sizeof(float))
@@ -198,23 +257,26 @@ void doFRAMStuff() {
       result = PASS;
       Serial.print(" Yaw: ");
       Serial.println(ff2b.f);
+      readFramAddress+=4;
     }
   }
 
-  // reset FRAM address to beginning
-  framAddress = 0x0000;
-
 
   Serial.print("\n\n-----------------------------");
-  Serial.println("\nF-RAM Read N samples End");
+  Serial.println("\nF-RAM Read N samples End\n");
 
 }
 
 void setup() {
+  hasStartedFram = false;
   i = 0;
+  myState = START;
   Serial.begin(115200);           // set up Serial library at 9600 bps
-  doFRAMStuff();
-  //  Serial.println("Adafruit Motorshield v2 - DC Motor test!");
+  // Initialize I2C F-RAM
+  FRAM_I2C_Init();
+  //doFRAMStuff();
+  readFramAddress = 0x0000; // last FRAM address read
+  writeFramAddress = 0x0000; // last FRAM address written
   AFMS.begin(); // default frequency of 1.6KHz
   motors[0] = motor_uno;
   motors[1] = motor_dos;
@@ -233,6 +295,12 @@ void setup() {
   for (int x = 0; x < 4; x++) {
     motors[x]->setSpeed((x + 1)*MAX_PWM / 4);
   }
+  pinMode(RED_LED_PIN, OUTPUT);           // set pin to output
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(BLUE_LED_PIN, OUTPUT);
+  digitalWrite(RED_LED_PIN, LOW);       // turn on pullup resistors
+  digitalWrite(GREEN_LED_PIN, LOW);       // turn on pullup resistors
+  digitalWrite(BLUE_LED_PIN, LOW);       // turn on pullup resistors
 }
 
 void loop() {
@@ -277,16 +345,53 @@ void loop() {
   Serial.print(F(" SampleFreq: "));
   Serial.print(samplefreq);
   Serial.println(F(""));
-  //  if (orientation.pitch > 0) {
-  //    motors[0]->setSpeed(MAX_PWM / MAX_ROLL * abs(orientation.pitch));
-  //    motors[0]->run(FORWARD);
-  //    motors[2]->run(RELEASE);
-  //  }
-  //  else if (orientation.pitch < 0) {
-  //    motors[2]->setSpeed(MAX_PWM / MAX_ROLL * abs(orientation.pitch));
-  //    motors[2]->run(FORWARD);
-  //    motors[0]->run(RELEASE);
-  //  }
+
+  if(myState == PLAYBACK && readFramAddress <= writeFramAddress){
+    framFloatToBytes readRoll, readPitch, readYaw;
+    if(!hasStartedFram){
+      readFramAddress = 0x0000;
+      FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
+      readFramAddress+=4;
+      hasStartedFram = !hasStartedFram;
+    }
+    else {
+      FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
+      readFramAddress+=4;
+    }
+    FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readPitch.b), sizeof(float));
+    FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readYaw.b), sizeof(float));
+    readFramAddress+=8;
+
+    rollPid.updateState(readRoll.f, orientation.roll);
+    pitchPid.updateState(readPitch.f, orientation.pitch);
+    yawPid.updateState(readYaw.f, orientation.heading);
+
+    float rollPwm = rollPid.getOutput();
+    float pitchPwm = pitchPid.getOutput();
+    float yawPwm =  yawPid.getOutput();
+
+     if (pitchPwm < 0) {
+     motors[0]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
+     motors[0]->run(FORWARD);
+     motors[2]->run(RELEASE);
+   }
+    else if (pitchPwm > 0) {
+     motors[2]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
+     motors[2]->run(FORWARD);
+     motors[0]->run(RELEASE);
+   }
+   if (yawPwm < 0) {
+     motors[1]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
+     motors[1]->run(FORWARD);
+     motors[3]->run(RELEASE);
+   }
+    else if (yawPwm > 0) {
+     motors[3]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
+     motors[3]->run(FORWARD);
+     motors[1]->run(RELEASE);
+   }
+
+  }
 
   //  for (int x = 0; x <= 360; x++) {
   //    getPWMForMotors((double)x, motor_drives);
@@ -301,35 +406,14 @@ void loop() {
   //    }
   //    //delay(10);
   //  }
-  //  Serial.print("Temperature = ");
-  //  Serial.print(bme.readTemperature());
-  //  Serial.println(" *C");
-  //
-  //  Serial.print("Pressure = ");
-  //  Serial.print(bme.readPressure());
-  //  Serial.println(" Pa");
-  //
-  //  Serial.print("Approx altitude = ");
-  //  Serial.print(bme.readAltitude(1013.25)); // this should be adjusted to your local forcase
-  //  Serial.println(" m");
 
-  uint8_t sts;
-  if (i < NUM_SAMPLES_READ) {
-    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, framAddress, reinterpret_cast<uint8_t*>(&orientation.roll), sizeof(float));
-    framAddress += 4;
-    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, framAddress, reinterpret_cast<uint8_t*>(&orientation.pitch), sizeof(float));
-    framAddress += 4;
-    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, framAddress, reinterpret_cast<uint8_t*>(&orientation.heading), sizeof(float));
-    framAddress += 4;
-    i++;
+  // Save measurements to FRAM
+  if (myState == RECORD) {
+    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.roll), sizeof(float));
+    writeFramAddress += 4;
+    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.pitch), sizeof(float));
+    writeFramAddress += 4;
+    sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.heading), sizeof(float));
+    writeFramAddress += 4;
   }
-
-  //  if (sts != FRAM_I2C_MSTR_NO_ERROR)
-  //  {
-  //    // I2C Error
-  //    Serial.print("\nCOM ERROR : ");
-  //    Serial.print(sts, HEX);
-  //    COM_ERR();
-  //  }
-
 }
