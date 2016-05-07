@@ -66,8 +66,8 @@
 #define GREEN_LED_PIN 9
 #define RED_LED_PIN 10
 #define BLUE_LED_PIN 11
-#define ROCKER_PIN 2
-#define GREEN_BTN_PIN 3
+#define ROCKER_PIN 3
+#define GREEN_BTN_PIN 2
 
 // FRAM constants
 #define NUM_SAMPLES_READ 100 // try to read the first 100 gyro measurements
@@ -103,9 +103,10 @@ uint8_t *toFram;
 unsigned int i;
 volatile uint32_t readFramAddress;
 volatile uint32_t writeFramAddress;
-bool hasStartedFram;
 uint8_t sts;
 
+volatile bool btnPrev; // previous pushbutton state
+volatile unsigned long timeBtnPrev;
 float samplefreq;
 unsigned long last_time;
 unsigned long new_time;
@@ -294,7 +295,15 @@ void printIMUOutput() {
   Serial.print(orientation.heading);
   Serial.print(F(" SampleFreq: "));
   Serial.print(samplefreq);
+  Serial.print("Fram address: ");
+  Serial.print(writeFramAddress);
   Serial.println(F(""));
+}
+
+void releaseMotors(){
+  for (int y = 0; y < 4; y++) {
+       motors[y]->run(RELEASE);
+     }
 }
 
 void updateIMUAndDoMadgwick() {
@@ -325,12 +334,40 @@ void updateIMUAndDoMadgwick() {
 }
 
 void rockerISR() {
-  if (digitalRead(ROCKER_PIN)) {
-    myState = START;
-  }
-  else {
-    myState = RECORD;
-    writeFramAddress = 0x0000;
+  /* parameter NDELAY = 650000;
+   parameter NBITS = 20;
+
+   reg [NBITS-1:0] count;
+   reg xnew, clean;
+
+   always @(posedge clk)
+     if (reset) begin xnew <= noisy; clean <= noisy; count <= 0; end
+     else if (noisy != xnew) begin xnew <= noisy; count <= 0; end
+     else if (count == NDELAY) clean <= xnew;
+     else count <= count+1;*/
+
+  bool current = digitalRead(ROCKER_PIN);
+  // if(current = ~btnPrev && (millis() - timeBtnPrev > 10))
+  // {
+  //   btnPrev = current;
+  //   timeBtnPrev = millis();
+  //   if (current) {
+  //     myState = START;
+  //   }
+  //   else {
+  //     myState = RECORD;
+  //     writeFramAddress = 0x0000;
+  //  }
+  // }
+  if(millis()-timeBtnPrev >= 30){
+    if(myState == RECORD){
+      myState = START;
+    }
+    else if (myState == START){
+      myState = RECORD;
+      writeFramAddress = 0x0000;
+    }
+    timeBtnPrev = millis();
   }
 }
 
@@ -342,7 +379,7 @@ void greenBtnISR() {
 }
 
 void setup() {
-  hasStartedFram = false;
+  btnPrev = HIGH;
   i = 0;
   myState = START;
   Serial.begin(115200);           // set up Serial library at 9600 bps
@@ -374,7 +411,7 @@ void setup() {
   pinMode(BLUE_LED_PIN, OUTPUT);
   pinMode(ROCKER_PIN, INPUT);             // set rocker pin to input
   pinMode(GREEN_BTN_PIN, INPUT);          // set green pushbutton pin to input
-  attachInterrupt(digitalPinToInterrupt(ROCKER_PIN), rockerISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ROCKER_PIN), rockerISR, RISING);
   attachInterrupt(digitalPinToInterrupt(GREEN_BTN_PIN), greenBtnISR, LOW);
 }
 
@@ -418,16 +455,15 @@ void loop() {
 
   if (myState == DELAY && (new_time - delayStart >= 2000)) {
     myState = PLAYBACK;
+    readFramAddress = 0x0000;
   }
 
   if (myState == PLAYBACK) {
     if (readFramAddress <= writeFramAddress) {
       framFloatToBytes readRoll, readPitch, readYaw;
-      if (!hasStartedFram) {
-        readFramAddress = 0x0000;
+      if (readFramAddress == 0x0000) {
         FRAM_I2C_Random_Read(FRAM_SLAVE_SRAM_ADDR, readFramAddress, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
         readFramAddress += 4;
-        hasStartedFram = !hasStartedFram;
       }
       else {
         FRAM_I2C_Current_Read(FRAM_SLAVE_SRAM_ADDR, reinterpret_cast<uint8_t *>(readRoll.b), sizeof(float));
@@ -469,18 +505,19 @@ void loop() {
     else {
       myState = START; // played back all the samples so we're back at our original state
       readFramAddress = 0x0000; // go back to the beginning of the read address.
+      releaseMotors();
     }
   }
 
   if (myState == START) {
-    for (int x = 0; x <= 360; x++) {
-      getPWMForMotors((double)x, motor_drives);
-      for (int y = 0; y < 4; y++) {
-        motors[y]->setSpeed(motor_drives[y]);
-        motors[y]->run(FORWARD);
-      }
-      //delay(10);
-    }
+//    for (int x = 0; x <= 360; x++) {
+//      //getPWMForMotors((double)x, motor_drives);
+//      for (int y = 0; y < 4; y++) {
+//        motors[y]->setSpeed(x/5);
+//        motors[y]->run(FORWARD);
+//      }
+//      //delay(10);
+//    }
   }
 
   // Save measurements to FRAM
@@ -491,5 +528,7 @@ void loop() {
     writeFramAddress += 4;
     sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.heading), sizeof(float));
     writeFramAddress += 4;
+    Serial.print("Fram address: ");
+    Serial.println(writeFramAddress);
   }
 }
