@@ -60,14 +60,12 @@
 // Constants for motor drive
 #define MAX_PWM 150
 #define MIN_PWM -150
-#define MAX_PITCH 90
-#define MAX_YAW 180
-#define MAX_ROLL 90
 #define GREEN_LED_PIN 9
 #define RED_LED_PIN 10
 #define BLUE_LED_PIN 11
 #define ROCKER_PIN 3
 #define GREEN_BTN_PIN 2
+#define NUM_MOTORS 4
 
 // FRAM constants
 #define NUM_SAMPLES_READ 100 // try to read the first 100 gyro measurements
@@ -83,11 +81,6 @@
 #define twoKiDef  (2.0f * 0.0f) // 2 * integral gain
 
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
-
-Adafruit_DCMotor *motor_uno = AFMS.getMotor(1);
-Adafruit_DCMotor *motor_dos = AFMS.getMotor(2);
-Adafruit_DCMotor *motor_tres = AFMS.getMotor(3);
-Adafruit_DCMotor *motor_cuatro = AFMS.getMotor(4);
 
 /* Assign a unique ID to the sensors */
 Adafruit_9DOF                 dof   = Adafruit_9DOF();
@@ -112,6 +105,7 @@ unsigned long last_time;
 unsigned long new_time;
 volatile unsigned long delayStart;
 float dt;
+float minima;
 
 sensors_event_t accel_event;
 sensors_event_t mag_event;
@@ -131,10 +125,10 @@ class PIDControl
     float error, error_deriv, error_integral, output;
 
   public:
-    PIDControl(): PIDControl(0.1f, 2.0f, 0.5f) {}
-    PIDControl(float ki, float kp, float kd) {
-      this->ki = ki;
+    PIDControl(): PIDControl(2.0f, 0.1f, 0.5f) {}
+    PIDControl(float kp, float ki, float kd) {
       this->kp = kp;
+      this->ki = ki;
       this->kd = kd;
     }
 
@@ -156,8 +150,8 @@ class PIDControl
 };
 
 PIDControl rollPid;
-PIDControl pitchPid;
-PIDControl yawPid;
+PIDControl pitchPid(4.0f, 0.1f, 0.5f);
+PIDControl yawPid(2.0f, 0.1f, 0.5f);
 
 union framFloatToBytes {
   float f;
@@ -286,17 +280,21 @@ void doFRAMStuff() {
 }
 
 void printIMUOutput() {
-  Serial.print(F("Orientation: "));
-  Serial.print(F("Roll: "));
+//  Serial.print(F("Orientation: "));
+//  Serial.print(F("Roll:"));
+  Serial.print(F(" "));
   Serial.print(orientation.roll);
-  Serial.print(F(" Pitch: "));
+//  Serial.print(F(" Pitch:"));
+  Serial.print(F(" "));
   Serial.print(orientation.pitch);
-  Serial.print(F(" Yaw: "));
+//  Serial.print(F(" Yaw:"));
+  Serial.print(F(" "));
   Serial.print(orientation.heading);
-  Serial.print(F(" SampleFreq: "));
+//  Serial.print(F(" SampleFreq:"));
+  Serial.print(F(" "));
   Serial.print(samplefreq);
-  Serial.print("Fram address: ");
-  Serial.print(writeFramAddress);
+//  Serial.print(" Fram address: ");
+//  Serial.print(writeFramAddress);
   Serial.println(F(""));
 }
 
@@ -317,7 +315,7 @@ void updateIMUAndDoMadgwick() {
   float  gz = gyro_event.gyro.z;
 
   /* Get a new sensor event */
-  float  ax = (accel_event.acceleration.x) * 101 ;
+  float  ax = (accel_event.acceleration.x) *101 ;
   float  ay = accel_event.acceleration.y * 101;
   float  az = accel_event.acceleration.z * 101 ;
 
@@ -328,9 +326,12 @@ void updateIMUAndDoMadgwick() {
 
   myIMU.update(gx, gy, gz, ax, ay, az, mx, my, mz);
 
-  orientation.pitch = myIMU.getRoll() * 180 / PI;
-  orientation.roll = myIMU.getPitch() * 180 / PI;
-  orientation.heading = myIMU.getYaw() * 180 / PI;
+  orientation.pitch = (myIMU.getRoll() * 180 / PI) + 90;
+  orientation.roll = (myIMU.getPitch() * 180 / PI) + 90;
+  orientation.heading = 2* ((myIMU.getYaw() * 180 / PI) + 90) - minima;
+  if (orientation.heading <0){
+    minima += (orientation.heading);
+  }
 }
 
 void rockerISR() {
@@ -347,18 +348,6 @@ void rockerISR() {
      else count <= count+1;*/
 
   bool current = digitalRead(ROCKER_PIN);
-  // if(current = ~btnPrev && (millis() - timeBtnPrev > 10))
-  // {
-  //   btnPrev = current;
-  //   timeBtnPrev = millis();
-  //   if (current) {
-  //     myState = START;
-  //   }
-  //   else {
-  //     myState = RECORD;
-  //     writeFramAddress = 0x0000;
-  //  }
-  // }
   if(millis()-timeBtnPrev >= 30){
     if(myState == RECORD){
       myState = START;
@@ -389,10 +378,10 @@ void setup() {
   readFramAddress = 0x0000; // last FRAM address read
   writeFramAddress = 0x0000; // last FRAM address written
   AFMS.begin(); // default frequency of 1.6KHz
-  motors[0] = motor_uno;
-  motors[1] = motor_dos;
-  motors[2] = motor_tres;
-  motors[3] = motor_cuatro;
+
+  for(int x = 0; x < NUM_MOTORS; x++){
+    motors[x]= AFMS.getMotor(x+1);
+  }
 
   /* Initialise the sensors */
   initSensors();
@@ -404,7 +393,7 @@ void setup() {
 
   // sets the direction of the motors to none (i.e. don't spin)
   for (int x = 0; x < 4; x++) {
-    motors[x]->setSpeed((x + 1)*MAX_PWM / 4);
+    motors[x]->setSpeed(/*(x + 1)*MAX_PWM / 4*/0);
   }
   pinMode(RED_LED_PIN, OUTPUT);           // set pin to output
   pinMode(GREEN_LED_PIN, OUTPUT);
@@ -458,7 +447,7 @@ void loop() {
     readFramAddress = 0x0000;
   }
 
-  if (myState == PLAYBACK) {
+  else if (myState == PLAYBACK) {
     if (readFramAddress <= writeFramAddress) {
       framFloatToBytes readRoll, readPitch, readYaw;
       if (readFramAddress == 0x0000) {
@@ -481,25 +470,30 @@ void loop() {
       float pitchPwm = pitchPid.getOutput();
       float yawPwm =  yawPid.getOutput();
 
+      Serial.print(F("YawPWM: "));
+      Serial.print(yawPwm);
+      Serial.print(F(" PitchPWM: "));
+      Serial.println(pitchPwm);
+
       if (pitchPwm < 0) {
-        motors[0]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
-        motors[0]->run(FORWARD);
-        motors[2]->run(RELEASE);
-      }
-      else if (pitchPwm > 0) {
-        motors[2]->setSpeed(MAX_PWM / MAX_PITCH * abs(pitchPwm));
+        motors[2]->setSpeed(abs(pitchPwm));
         motors[2]->run(FORWARD);
         motors[0]->run(RELEASE);
       }
-      if (yawPwm < 0) {
-        motors[1]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
-        motors[1]->run(FORWARD);
-        motors[3]->run(RELEASE);
+      else if (pitchPwm > 0) {
+        motors[0]->setSpeed(abs(pitchPwm));
+        motors[0]->run(FORWARD);
+        motors[2]->run(RELEASE);
       }
-      else if (yawPwm > 0) {
-        motors[3]->setSpeed(MAX_PWM / MAX_YAW * abs(yawPwm));
+      if (yawPwm < 0) {
+        motors[3]->setSpeed(abs(yawPwm));
         motors[3]->run(FORWARD);
         motors[1]->run(RELEASE);
+      }
+      else if (yawPwm > 0) {
+        motors[1]->setSpeed(abs(yawPwm));
+        motors[1]->run(FORWARD);
+        motors[3]->run(RELEASE);
       }
     }
     else {
@@ -509,7 +503,7 @@ void loop() {
     }
   }
 
-  if (myState == START) {
+ else if (myState == START) {
 //    for (int x = 0; x <= 360; x++) {
 //      //getPWMForMotors((double)x, motor_drives);
 //      for (int y = 0; y < 4; y++) {
@@ -521,14 +515,14 @@ void loop() {
   }
 
   // Save measurements to FRAM
-  if (myState == RECORD) {
+  else if (myState == RECORD) {
     sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.roll), sizeof(float));
     writeFramAddress += 4;
     sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.pitch), sizeof(float));
     writeFramAddress += 4;
     sts =   FRAM_I2C_Write(FRAM_SLAVE_SRAM_ADDR, writeFramAddress, reinterpret_cast<uint8_t*>(&orientation.heading), sizeof(float));
     writeFramAddress += 4;
-    Serial.print("Fram address: ");
-    Serial.println(writeFramAddress);
+//    Serial.print(" Fram address: ");
+//    Serial.println(writeFramAddress);
   }
 }
