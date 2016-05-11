@@ -1,0 +1,23 @@
+\chapter{System Integration}
+\label{chap:sysint}
+
+\section{Power}
+
+The bat device and its peripherals are powered by four AA batteries housed in a battery pack.  A toggle switch located opposite the rocker and pushbutton switches turns on the apparatus.  The terminals are connected to the motor driver board, which then provides power to the ATmega328p.
+
+\section{IMU Measurements}
+
+The Adafruit 9DOF module is read continuously.  As previously mentioned in \autoref{chap:hardware:ssec:imu} the IMU outputs three floating point integers for the x,y, and z axis of the accelerometer, magnetometer, and gyroscope.  Each floating point integer uses 32 bits of memory, which means that it takes 12 floats to store the x,y, and z values of each sensor.  48 bytes in total are needed for each sample period of the sensors.  It becomes apparent that memory is a limiting factor when storing floating point integers sampled at high rates.  If a user desired to store the 48 bytes sensor data of a 30 second sampling period at a sampling rate of 60 Hertz then that would require approximately 86Kbytes of data, more than the total ATmega memory space.  It is also desirable to compress the sampled data into a smaller number of bits without losing the capability of extracting absolute coordinate values with respect to a reference frame.
+
+
+\section{FRAM Storage/Retrieval}
+
+The Cypress FRAM board has 32Kbytes of memory.  Data transfers from the ATmega328p microcontroller to the I2C module occur in bytes.  Up to 32 bytes of memory can be transferred in a single transaction.  Because the Cypress FRAM stores individual bytes in its memory and floating point integers are 32 bits wide care must be taken to ensure that the floating point integers can be separated into four bytes and recovered as 32 bits from a memory read.  Solution is the C union datatype, whereby consecutive memory addresses are mapped as the maxima of two different data types. In this case both an array of integers and a single floating point integer can be mapped to the same memory address.
+
+\section{Motor Board}
+
+The final version of the motor board used in the device provides the advantage of effectively using only two pins for control of four bidirectional motors since it's a I2C device.  The supporting software header files developed by Adafruit provide an easy mechanism whereby speed and direction can be controlled easily.
+
+\section{Microcontroller}
+
+The microcontroller is the center of every input and output to the bat.  Since the board runs at 16 Megahertz it is important to take into consideration the time spent calculating yaw, pitch, and roll values and ensuring that the sampling rate of the IMU allows for effective feedback.  The microcontroller's pin interrupts are triggered when the user presses either the rocker switch or the pushbutton switch.  Triggering on an interrupt allows the microcontroller to immediately "interrupt" currently-executing code and execute the Interrupt Service Routine.  This same mechanism allows the microcontroller to calculate accurate time wth regards to the number of micro and milliseconds passed since the device last turned on.

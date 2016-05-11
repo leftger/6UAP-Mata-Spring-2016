@@ -1,0 +1,68 @@
+\chapter{Software}
+
+% Sketch uses 26,726 bytes (82.9%) of program storage space. Maximum is 32,256 bytes.
+% Global variables use 1,192 bytes (58.2%) of dynamic memory, leaving 856 bytes for local variables. Maximum is 2,048 bytes.
+The compiled code uses 26,726 bytes out of a total 32,256 bytes (82.9\% of program storage space) and 1,192 bytes out of a total 2,048 bytes (58.2\% of dynamic memory).  The relatively high program space use is impressive considering that various functions are used to talk to three different I2C devices and each device stores its own variables within the microcontroller memory space.  
+
+\section{State Machine Description}
+
+At startup the microcontroller configures all of the I2C using their respective header and implementation files.
+
+Pins 2 and 3 of the ATmega328p are configured as interrupt pins. The pushbutton switch triggers an interrupt when the logic level changes to a low logic level.  The rocker switch triggers an interrupt on a rising edge.
+
+Pins 8,9, and 10 are configured as output pins.  The RGB LED has a common anode, so a high logic level turns off the LED and a low logic level drives current through the LED.
+
+Initially the state of the device is configured to START.  The RGB LED is illuminated at a constant blue color in this state.  When the user holds the rocker switch the interrupt to which it's configured to triggers a change of state to RECORD.  The RGB LED is illuminated at a constant red color in this state.  As long as the user holds the rocker switch the microcontroller will continue to store coordinate samples to FRAM.
+
+Once the user releases the rocker switch it triggers another interrupt and the microcontroller changes the state to START again.  The last memory address written to is stored in the writeFramAddress variable.
+
+When the user momentarily presses the pushbutton switch the microcontroller sets readFramAddress to address 0x0000.  The microcontroller then transitions to the DELAY state.
+
+The DELAY state was implemented to allow the user time to prepare his/herself to the initial position of the reference swing. The RGB LED is illuminated at a constant yellow color in this tate.  After two seconds the microcontroller transitions to the PLAYBACK state.
+
+In this state the microcontroller reads the FRAM memory locations starting with address 0x0000.  The current read FRAM address is stored in readFramAddress.  At every sample the roll, pitch, and yaw measurements are added to three parallel PID controllers with individually configurable gains in code.  The output from the PID controllers are calculated and are applied to the pitch and yaw directions.  The vibration of the motors is proportional to the error of the current coordinate versus the reference coordinate. The motor that vibrates is the opposite direction of the corrected direction of travel.
+
+\section{Measurement Filtering}
+
+% \cite{imu_filter_madgwick}
+
+% requiring 109 (IMU) or 277 (MARG) scalar arithmetic
+% operations each filter update
+
+Madgwick's paper \cite{imu_filter_madgwick} describes an implementation of a gradient descent algorithm useful for calculation of roll, pitch, and yaw coordinates requiring 277 scalar arithmetic operations.  Assuming a 16 MHz clock rate and an average of one instruction completed for every two clock cycles then there is a theoretical upper limit of 28.8 kHz sampling rate.  This is without taking into consideration the 100 kHz clock rate of the serial I2C and the time it takes to poll the IMU and FRAM.  Madgwick's algorithm takes in raw accelerometer readings and performs an efficient gradient descent algorithm where a measurement of the Earth's magnetic field within the sensor frame will allow an orientation of the sensor frame relative to the earth frame to be calculated.
+
+This algorithm is updated at each sample and the calculated roll, pitch, and yaw are provided as output.  The output of that same is then used as input to three parallel PID controllers.
+
+\section{Feedback Implementation}
+
+The continuous time PID controller can be described by the following equation:
+
+\[output(t) = K_p * error(t) + K_i * \int_{0}^{t}error(\tau)\,d\tau + K_d * \frac{\mathrm{d} }{\mathrm{d} t} error(t)\]
+
+where error(t) is defined as:
+
+\[error(t) = desired(t) - measured(t)\]
+
+Whereas the discrete time PID controller can be described by the following:
+
+\[output[n] = K_p * error[n] + K_i * \sum_{x=0}^{n}error(x) + K_d*\frac{error[n]}{\Delta t}\]
+
+where error[n] is defined as:
+
+\[error[n] = desired[n] - measured[n]\]
+
+In these equations there are a couple of changes that can be tweaked depending on the application. Beauregard's onine article \cite{beauregardbrett2011} states that if we assume that our error term can become too large at any one time then we can also prevent the output from going outside of the range of PWM values.  In the following code one can appreciate the modifications necessary to prevent overshooting of the PID controller.  At the same time the dt term may be irregular, so it is calculated depending on the change in time since the PID controller was last run.  This is included elsewhere in the source code.
+
+\begin{lstlisting}
+    void updateState(float newDesired, float current) {
+      desired = newDesired;
+      prev_error = error;
+      current_meas = current;
+      error = desired - current_meas; // current error
+      error_integral += error * dt * ki;
+      if (error_integral > MAX_PWM) error_integral = MAX_PWM;
+      else if (error_integral < MIN_PWM) error_integral = MIN_PWM;
+      error_deriv = (error - prev_error) / dt;
+      output = kp * error + error_integral - kd * error_deriv;
+    }
+\end{lstlisting}

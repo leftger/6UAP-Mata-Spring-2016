@@ -1,0 +1,46 @@
+\chapter{Hardware}
+\label{chap:hardware}
+
+The swing feedback system involves significant use of electronic components.  The objective was to use only as many wires as necessary due to the constrained environment inside the baseball bat after the microcontroller, the peripherals, and the motor supports were included.  It became an even more pressing issue when the addition of supports limited the bending of wires inside each partition.
+
+\section{System Overview}
+
+The bat device is composed of the following components:
+
+\begin{enumerate}
+\item An ATmega328p 16MHz microcontroller in an Arduino development board
+\item A Cypress CY15FRAMKIT-001 Serial F-RAM Development Kit
+\item An Adafruit V2 Motor Shield for Arduino
+\item An Adafruit 9DOF IMU
+\item Four vibration motors
+\item A rocker switch
+\item A pushbutton
+\item One RGB LED
+\end{enumerate}
+
+A system diagram can be seen in \autoref{fig:hardware_overview}
+
+\subsection{ATmega328p Microcontrolller}
+
+The microcontroller uses an 8-bit RISC architecture and runs at 16MHz with 32Kbytes of program memory and 2Kbytes of RAM.  It has three onboard timers: one is used by the Arduino library for the millis() and micros() timekeeping functions.  The second timer is used for button interrupts, and the last one is used for other optional timing events.  The Arduino programming environment exposes two external interrupt pins.  The microcontroller also includes serial, SPI, and I2C modules which allow serialized communications with external peripherals.  There are also various PWM (Pulse Width Modulation) pins which allow for time-averaged variable voltage.  This specific microcontroller has also enjoyed widespread adoption amongst the "maker" crowd, which has allowed the development of various third party "libraries" (in essence header and include files) that facilitate the rapid prototyping of embedded systems.
+
+\subsection{Cypress FRAM Module}
+
+Ferroelectric RAM is a relatively recent technology that is useful for embedded applications.  Cypress Semiconductor claims their FRAM modules can widthstand up to 100 trillion write cycles.  This specific memory is also nonvolatile and have fast read and write times.  The Cypress module includes 32Kbytes of memory in a I2C module and another 32Kbytes of memory in a SPI module.  
+
+\subsection{IMU}
+\label{chap:hardware:ssec:imu}
+
+The Adafruit 9DOF IMU module is composed of the L3GD20H 3-axis gyroscope and the LSM303 magnetometer/accelerometer module.  Each device is addressed through its own I2C address at a clock rate of 100KHz.  The module outputs three floating point integers for each axis of the accelerometer, gyroscope, and magnetometer.  Each sensor has configurable gains and can be programmed to trigger interrupts given a predetermined condition.  For this project the raw sampling mode was employed.
+
+\subsection{Motor Shield and Vibration Motors}
+
+The vibration motors are driven at 5 volts through a motor controller board.  The controller board is essentially a I2C-addressed shift register connected to two dual H-bridges that are capable of driving up to four vibration motors bidirectionally.
+
+\section{User Input/Output}
+
+User input is provided through a rocker switch and a push button.  The rocker switch serves to indicate to the microcontroller when it should start saving measurements into FRAM (this will be explained in further detail in \autoref{chap:sysint}).  The pushbutton is pressed whenever the user desired to reproduce the reference coordinate measurements (the functionality of which is explained in \autoref{chap:sysint}).  The RGB LED serves to let the user know in what state the device is currently in.
+
+\section{Considerations}
+
+The devices were chosen for their ease of integration with the Arduino board and due in part to the total number of ports used by the I2C devices.  I2C uses a master-slave protocol whereby the master addresses an individual device using a 7-bit address and sends data bits afterwards.  The slave responds with an ACK bit acknowledging receipt of a message.  The physical bus itself uses two wires: SCL (Serial Clock) and SDA (Serial Data).  The number of physical pins used by a device become a point of consideration when trying to integrate multiple components.  The RGB LED uses three pins (specifically pins 8,9, and 10) on the Arduino board, which also happen to be PWM pins.  This allows for future iterations to be able to light up to potentially 16 million colors (8 bits of color for each R,G, and B LED) on a single LED.  The switches were connected to pins 2 and 3 which allowed the pins to be configured as external interrupts (the functionality which will be explained in \autoref{chap:sysint}).

@@ -1,0 +1,16 @@
+\newcommand{\noopsort}[1]{} \newcommand{\printfirst}[2]{#1}
+  \newcommand{\singleletter}[1]{#1} \newcommand{\switchargs}[2]{#2#1}
+\begin{thebibliography}{1}
+
+\bibitem{beauregardbrett2011}
+Brett Beauregard.
+\newblock Improving the beginner's pid - introduction, apr 2011.
+
+\bibitem{imu_filter_madgwick}
+Sebastian O.~H. Madgwick, Andrew J.~L. Harrison, and Ravi Vaidyanathan.
+\newblock {Estimation of IMU and MARG orientation using a gradient descent
+  algorithm}.
+\newblock In {\em Proceedings of the IEEE International Conference on
+  Rehabilitation Robotics (ICORR)}, pages 1--7. IEEE, June 2011.
+
+\end{thebibliography}

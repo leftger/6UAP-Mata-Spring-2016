@@ -1,0 +1,23 @@
+\chapter{Design Process}
+
+The original idea was inspired from the swinging motion required to swing a sledgehammer to drive a wooden stake.  The motion requires precision at the moment just before the sledgehammer strikes the stake since any significant deviation from the head of the stake means the sledgehammer will miss the stake and the work required to bring the hammer up and swing the weight downwards will have been lost.
+
+\section{Enclosure}
+
+Within the context of a physical implement it became apparent that space would be required to store all the electronics and accessories.  Anything composed ferromagnetic metal would have imposed additional challenges since the magnetometer works on the assumption that it is distant from any strong magnetic fields or anything capable of being induced by magnetic fields.  Wood itself is rigid and has qualities advantageous to being subjected to significant forces. Unfortunately working with wood also requires specialized tools and significant care that every cut and bore be planned.
+
+Plastic is cheap, fairly flexible, and can be quite rigid if properly supported.  It also allows for large enclosures to be made with fairly thin walls.  It is also immune to EM (electromagnetic) fields and is an excellent insulator.
+
+The enclosure chosen for the electronics is a "MLB Jumbo Plastic Bat" developed by Franklin Sports.  It measures approximately 25 inches with an internal radius of 3\(\frac{1}{2}\) inches for a length of 11 inches with a decreasing radius down to 1\(\frac{3}{16}\) inches.  The bat can be seen in \autoref{fig:jumbo_bat}
+
+The plastic bat was cut in half lengthwise along the mold joint.  This allowed all of the electronics, wiring, pushbuttons, and LED to be placed inside the bat at the loss of vital structural integrity. The development of structural supports were needed to be able to join the plastic bat together and provide support when the bat was used.
+
+\section{Reinforcements}
+
+Since the structural integrity of the bat was reduced the laser cutter at the EDS located in the fifth floor of building 38 was used to make internal supports for the plastic baseball bat.  \autoref{fig:supports} shows the general dimensions of the internal supports.  The baseball bat had slots cut into it so that the protrusions of the supports could serve as slats on which the bat could support itself.  Within each structural support four holes were cut so that wires could be passed from one section of the bat to the other.  The supports were then adhered to one half of the bat with epoxy.  The other half was left detached so that the bat could be disassembled.  The main electronic components were able to be placed securely inside one of the partitions the supports formed.  Ample space was provided for the purpose of inserting masses to change the center of mass.  The electronics and motor assembly proved to be quite heavy so two steel bolts were placed inside the bat handle to balance the bat. 
+
+
+\section{Motor Assembly}
+
+Four vibration motors needed to be placed $90^{\circ}$ from each other in order to provide yaw and pitch feedback.  Seeing as how rotation along the principal axis of a baseball bat is largely irrelevant it later became clear that roll coordinates were largely unnecessary.  The motor's vibrations could interfere with the measurements of the IMU, which meant that a damping adhesive would be advantageous to reduce noise in the coordinate measurements.  Four holes were cut in the bat: two holes perpendicular to the cut plane of the bat and half holes on each side of the cut bat.  All of the holes were placed four inches from the top of the bat.  The motors were secured with hot glue to plastic IC packaging tubes.  The empty channel inside the packaging tube allowed the vibration motor wiring to be passed through the tube and into the baseball bat.
+

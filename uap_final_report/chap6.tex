@@ -1,0 +1,15 @@
+\chapter{Performance and Future Work}
+
+
+
+\section{Speed and Accuracy}
+
+The filter achieves stability within two-three seconds from startup.  This is somewhat limiting in its responsiveness and can probably be corrected through Madgwick's filter tuning.  The PID controller achieves good performance at small angle deviations.  This can also be corrected through PID tuning.  The principal limiting facts include the relatively low clock rate of the ATmega32p and the IMU's 100 kHz sampling rate.  The peripherals themselves are capable of being clocked at higher rates (up to 400 kHz according to their respective datasheets) so in effect the microcontroller has become the bottleneck.
+
+\section{Improvements}
+
+Madgwick's filter provides fast reaction to large movements, but struggles to converge to its final value, with an average time constant of 1.2 seconds.  While disappointing the filter response can probably be improved through filter tuning.
+
+\section{Future Work}
+
+This project provided a good foundation from which further work in the realm of user feedback can be started.  With the eventual proliferation of the Internet-Of-Things further applications of feedback will be found and eventually better-performing sensors will be developed that will allow control designers to achieve even better performance in areas such as autonomous flight and responsive critical systems.

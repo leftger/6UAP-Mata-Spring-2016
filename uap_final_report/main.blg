@@ -1,0 +1,59 @@
+This is BibTeX, Version 0.99d (TeX Live 2015)
+Capacity: max_strings=35307, hash_size=35307, hash_prime=30011
+The top-level auxiliary file: main.aux
+A level-1 auxiliary file: cover.aux
+A level-1 auxiliary file: contents.aux
+A level-1 auxiliary file: chap1.aux
+A level-1 auxiliary file: chap2.aux
+A level-1 auxiliary file: chap3.aux
+A level-1 auxiliary file: chap4.aux
+A level-1 auxiliary file: chap5.aux
+A level-1 auxiliary file: chap6.aux
+A level-1 auxiliary file: appb.aux
+A level-1 auxiliary file: biblio.aux
+The style file: plain.bst
+Database file #1: main.bib
+Warning--entry type for "beauregardbrett2011" isn't style-file defined
+--line 6 of file main.bib
+You've used 2 entries,
+            2118 wiz_defined-function locations,
+            518 strings with 4595 characters,
+and the built_in function-call counts, 643 in all, are:
+= -- 61
+> -- 25
+< -- 1
++ -- 10
+- -- 8
+* -- 38
+:= -- 105
+add.period$ -- 6
+call.type$ -- 2
+change.case$ -- 10
+chr.to.int$ -- 0
+cite$ -- 2
+duplicate$ -- 26
+empty$ -- 58
+format.name$ -- 8
+if$ -- 140
+int.to.chr$ -- 0
+int.to.str$ -- 2
+missing$ -- 1
+newline$ -- 13
+num.names$ -- 4
+pop$ -- 17
+preamble$ -- 2
+purify$ -- 8
+quote$ -- 0
+skip$ -- 20
+stack$ -- 0
+substring$ -- 26
+swap$ -- 8
+text.length$ -- 1
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 8
+warning$ -- 0
+while$ -- 7
+width$ -- 3
+write$ -- 23
+(There was 1 warning)
