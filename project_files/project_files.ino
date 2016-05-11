@@ -141,7 +141,7 @@ class PIDControl
       if (error_integral > MAX_PWM) error_integral = MAX_PWM;
       else if (error_integral < MIN_PWM) error_integral = MIN_PWM;
       error_deriv = (error - prev_error) / dt;
-      output = kp * error + error_integral - kd * error_deriv;
+      output = kp * error + error_integral + kd * error_deriv;
     }
 
     float getOutput() {
