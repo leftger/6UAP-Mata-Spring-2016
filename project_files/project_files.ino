@@ -121,7 +121,7 @@ class PIDControl
 {
     float ki, kp, kd;
     float desired;
-    float current_meas, prev_meas;
+    float current_meas, prev_error;
     float error, error_deriv, error_integral, output;
 
   public:
@@ -134,13 +134,13 @@ class PIDControl
 
     void updateState(float newDesired, float current) {
       desired = newDesired;
-      prev_meas = current_meas;
+      prev_error = error;
       current_meas = current;
       error = desired - current_meas; // current error
       error_integral += error * dt * ki;
       if (error_integral > MAX_PWM) error_integral = MAX_PWM;
       else if (error_integral < MIN_PWM) error_integral = MIN_PWM;
-      error_deriv = (current_meas - prev_meas) / dt;
+      error_deriv = (error - prev_error) / dt;
       output = kp * error + error_integral - kd * error_deriv;
     }
 
